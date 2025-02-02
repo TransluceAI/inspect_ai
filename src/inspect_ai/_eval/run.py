@@ -100,10 +100,13 @@ async def eval_run(
         eval_solver = None
         eval_solver_spec = None
 
+    print("run_dir", run_dir)
+
     try:
         # create run tasks
         task_run_options: list[TaskRunOptions] = []
         for resolved_task in tasks:
+            print("task_run_dir", task_run_dir(resolved_task.task))
             with chdir(task_run_dir(resolved_task.task)):
                 # tasks can provide their epochs, message_limit,
                 # token_limit, time_limit, and fail_on_error so broadcast these
