@@ -148,3 +148,6 @@ dev = [
 ]
 doc = ["quarto-cli", "jupyter"]
 dist = ["twine", "build"]
+
+[tool.uv]
+managed=false
