@@ -819,11 +819,6 @@ def eval_init(
             init_active_model(m, generate_config)
             resolved_tasks.extend(resolve_tasks(tasks, task_args, m, sandbox))
 
-    print("after task resolution")
-    print(resolved_tasks)
-    print("task_0", resolved_tasks[0].task.__dict__)
-    print("model_0", resolved_tasks[0].model.__dict__)
-
     # resolve approval
     if isinstance(approval, str | ApprovalPolicyConfig):
         approval = approval_policies_from_config(approval)
