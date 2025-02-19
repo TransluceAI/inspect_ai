@@ -83,13 +83,60 @@ def python(timeout: int | None = None, user: str | None = None) -> Tool:
         Returns:
           The output of the Python code.
         """
+        result = await sandbox().exec(cmd=["python3"], input=code, timeout=timeout, user=user)
+        # return output (including stderr if any)
+        output = ""
+        if result.stderr:
+            output = f"{result.stderr}\n"
+        return f"{output}{result.stdout}"
+
+    return execute
+
+
+@tool(viewer=code_viewer("python", "code"))
+def ipython(timeout: int | None = None, user: str | None = None) -> Tool:
+    """Python code execution tool.
+
+    Execute Python code using a sandbox environment (e.g. "docker").
+
+    Same as the regular Python tool, except it persists variables between tool calls, as long as
+    there were no runtime errors.
+
+    Args:
+      timeout (int | None): Timeout (in seconds) for command.
+      user (str | None): User to execute commands as.
+
+    Returns:
+      String with command output (stdout) or command error (stderr).
+    """
+
+    async def execute(code: str) -> str:
+        """
+        Use the python function to execute Python code.
+
+        The python function will only return you the stdout of the script,
+        so make sure to use print to see the output.
+
+        Args:
+          code (str): The python code to execute.
+
+        Returns:
+          The output of the Python code.
+        """
+        prev_code = ""
+        try:
+            prev_code = await sandbox().read_file("code.py")
+        except FileNotFoundError:
+            pass
         result = await sandbox().exec(
-            cmd=["python3"], input=code, timeout=timeout, user=user
+            cmd=["python3"], input=prev_code + "\n" + code, timeout=timeout, user=user
         )
         # return output (including stderr if any)
         output = ""
         if result.stderr:
             output = f"{result.stderr}\n"
+        else:
+            await sandbox().write_file("code.py", prev_code + "\n" + code)
         return f"{output}{result.stdout}"
 
     return execute
