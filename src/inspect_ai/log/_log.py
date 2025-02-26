@@ -93,6 +93,9 @@ class EvalConfig(BaseModel):
     log_buffer: int | None = Field(default=None)
     """Number of samples to buffer before writing log file."""
 
+    event_stream_dir: str | None = Field(default=None)
+    """Temporary directory path to store message stream."""
+
     score_display: bool | None = Field(default=None)
     """Display scoring metrics realtime."""
 

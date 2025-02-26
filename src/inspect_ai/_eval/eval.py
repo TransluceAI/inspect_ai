@@ -215,6 +215,7 @@ async def eval_async(
     log_level_transcript: str | None = None,
     log_dir: str | None = None,
     log_format: Literal["eval", "json"] | None = None,
+    event_stream_dir: str | None = None,
     limit: int | tuple[int, int] | None = None,
     sample_id: str | int | list[str | int] | None = None,
     epochs: int | Epochs | None = None,
@@ -396,6 +397,7 @@ async def eval_async(
             log_images=log_images,
             log_buffer=log_buffer,
             score_display=score_display,
+            event_stream_dir=event_stream_dir,
         )
 
         # run tasks - 2 codepaths, one for the traditional task at a time

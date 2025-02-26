@@ -171,6 +171,8 @@ async def task_run(options: TaskRunOptions) -> EvalLog:
             log_images=log_images,
             message_limit=config.message_limit,
             token_limit=config.token_limit,
+            event_stream_dir=config.event_stream_dir,
+            task_id=task.name,
         )
 
         # resolve the plan (unroll chains)
@@ -583,9 +585,11 @@ async def task_run_sample(
 
                         # sample init event (remove file bodies as they have content or absolute paths)
                         event_sample = sample.model_copy(
-                            update=dict(files={k: "" for k in sample.files.keys()})
-                            if sample.files
-                            else None
+                            update=(
+                                dict(files={k: "" for k in sample.files.keys()})
+                                if sample.files
+                                else None
+                            )
                         )
                         transcript()._event(
                             SampleInitEvent(
@@ -823,6 +827,8 @@ async def resolve_dataset(
     log_images: bool,
     message_limit: int | None,
     token_limit: int | None,
+    event_stream_dir: str | None,
+    task_id: str | None,
 ) -> tuple[Dataset, list[Sample], list[TaskState]]:
     # slice dataset
     dataset = slice_dataset(dataset, limit, sample_id)
@@ -854,6 +860,8 @@ async def resolve_dataset(
                 token_limit=token_limit,
                 completed=False,
                 metadata=sample.metadata if sample.metadata else {},
+                event_stream_dir=event_stream_dir,
+                task_id=task_id,
             )
         )
         for epoch, sample in zip(sample_epochs, samples)

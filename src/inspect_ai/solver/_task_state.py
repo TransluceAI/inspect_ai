@@ -1,10 +1,13 @@
+import json
 from collections.abc import Sequence
 from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
 from itertools import tee
+from pathlib import Path
 from random import Random
 from typing import Any, Iterable, SupportsIndex, Type, Union, cast, overload
+from uuid import uuid4
 
 from pydantic_core import to_jsonable_python
 
@@ -148,6 +151,8 @@ class TaskState:
         token_limit: int | None = None,
         completed: bool = False,
         metadata: dict[str, Any] = {},
+        event_stream_dir: str | None = None,
+        task_id: str | None = None,
     ) -> None:
         self._model = model
         """Model name used for this task."""
@@ -211,6 +216,43 @@ class TaskState:
 
         self.scores: dict[str, Score] | None = None
         """Scores yielded by running task."""
+
+        # Setup message stream
+        if event_stream_dir is None:
+            self._message_stream_fpath = None
+            """Path to store message stream."""
+        else:
+            if task_id is None:
+                raise ValueError(
+                    "task_id must be provided if event_stream_dir is not None"
+                )
+
+            cur_event_stream_dir = Path(event_stream_dir) / str(uuid4())
+
+            # Create dir and write metadata
+            cur_event_stream_dir.mkdir(parents=True, exist_ok=True)
+            with open(cur_event_stream_dir / "metadata.json", "w") as f:
+                json.dump(
+                    dict(
+                        task_id=task_id,
+                        sample_id=sample_id,
+                        epoch_id=epoch,
+                    ),
+                    f,
+                )
+
+            # Set path
+            self._message_stream_fpath = cur_event_stream_dir / "messages.jsonl"
+            print(
+                f"Task message state will be streamed to: {self._message_stream_fpath}"
+            )
+
+    def dump_messages_to_stream(self) -> None:
+        """Dump the messages to the stream."""
+        if self._message_stream_fpath:
+            with open(self._message_stream_fpath, "w") as f:
+                for m in self._messages:
+                    f.write(m.model_dump_json() + "\n")
 
     @property
     def model(self) -> ModelName:

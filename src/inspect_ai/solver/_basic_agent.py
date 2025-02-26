@@ -174,6 +174,7 @@ def basic_agent(
                     input=state.messages, tools=state.tools, cache=cache
                 )
                 state.messages.append(state.output.message)
+                state.dump_messages_to_stream()
 
                 # check for context window overflow
                 if state.output.stop_reason == "model_length":
@@ -189,6 +190,7 @@ def basic_agent(
                         state.output.message, state.tools, max_output=max_tool_output
                     )
                     state.messages.extend(tool_results)
+                    state.dump_messages_to_stream()
 
                     # was an answer submitted?
                     answer = submission(tool_results)

@@ -3,6 +3,7 @@ import contextlib
 from contextvars import ContextVar
 from datetime import datetime
 from logging import getLogger
+from pathlib import Path
 from typing import (
     Any,
     Iterator,
