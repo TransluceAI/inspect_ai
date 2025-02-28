@@ -127,6 +127,8 @@ def registry_lookup(type: RegistryType, name: str) -> object | None:
     Returns:
         Object or None if not found.
     """
+    if not name.startswith("inspect_evals"):
+        name = f"inspect_evals/{name}"
 
     def _lookup() -> object | None:
         # first try
