@@ -83,7 +83,70 @@ def python(timeout: int | None = None, user: str | None = None) -> Tool:
         Returns:
           The output of the Python code.
         """
-        result = await sandbox().exec(cmd=["python3"], input=code, timeout=timeout, user=user)
+        result = await sandbox().exec(
+            cmd=["python3"], input=code, timeout=timeout, user=user
+        )
+        # return output (including stderr if any)
+        output = ""
+        if result.stderr:
+            output = f"{result.stderr}\n"
+        return f"{output}{result.stdout}"
+
+    return execute
+
+
+READ_STATE = """
+import dill
+import os
+if os.path.exists("temp.pkl"):
+    dill.load_module("temp.pkl")
+"""
+
+SAVE_STATE = """
+import dill
+
+dill.dump_module("temp.pkl")
+"""
+
+
+@tool(viewer=code_viewer("python", "code"))
+def dill_python(timeout: int | None = None, user: str | None = None) -> Tool:
+    """Python code execution tool.
+
+    Execute Python code using a sandbox environment (e.g. "docker").
+
+    Same as the regular Python tool, except it persists variables between tool calls, as long as
+    there were no runtime errors.
+
+    NOTE: requires having dill installed in docker image.
+
+    Args:
+      timeout (int | None): Timeout (in seconds) for command.
+      user (str | None): User to execute commands as.
+
+    Returns:
+      String with command output (stdout) or command error (stderr).
+    """
+
+    async def execute(code: str) -> str:
+        """
+        Use the python function to execute Python code.
+
+        The python function will only return you the stdout of the script,
+        so make sure to use print to see the output.
+
+        Args:
+          code (str): The python code to execute.
+
+        Returns:
+          The output of the Python code.
+        """
+        result = await sandbox().exec(
+            cmd=["python3"],
+            input=READ_STATE + "\n" + code + "\n" + SAVE_STATE,
+            timeout=timeout,
+            user=user,
+        )
         # return output (including stderr if any)
         output = ""
         if result.stderr:
