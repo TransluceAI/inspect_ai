@@ -89,7 +89,7 @@ ignore = ["W002", "W009"]
 
 [project]
 name = "inspect_ai"
-version = "0.0.0+transluce"
+version = "0.3.57+transluce"
 dynamic = ["dependencies"]
 description = "Framework for large language model evaluations"
 authors = [{ name = "UK AI Safety Institute" }]
