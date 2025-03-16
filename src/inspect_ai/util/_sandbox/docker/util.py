@@ -1,3 +1,4 @@
+import os
 import re
 from dataclasses import dataclass
 from logging import getLogger
@@ -93,3 +94,7 @@ inspect_project_pattern = r"^inspect-[a-z\d\-_]*-i[a-z\d]{6,}$"
 
 def is_inspect_project(name: str) -> bool:
     return re.match(inspect_project_pattern, name) is not None
+
+
+def is_local_docker():
+    return os.environ.get("MORPH_API_KEY", None) is None

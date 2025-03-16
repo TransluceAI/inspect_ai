@@ -7,7 +7,7 @@ from pathlib import Path, PurePosixPath
 from typing import Literal, Union, cast, overload
 
 from typing_extensions import override
-
+import hashlib
 from inspect_ai.util._subprocess import ExecResult, subprocess
 
 from ..environment import (
@@ -45,9 +45,46 @@ from .compose import (
 from .config import CONFIG_FILES, DOCKERFILE
 from .internal import build_internal_image, is_internal_image
 from .prereqs import validate_prereqs
-from .util import ComposeProject, task_project_name
+from .util import ComposeProject, is_local_docker, task_project_name
 
 logger = getLogger(__name__)
+
+from morphcloud.api import MorphCloudClient, Instance
+
+if not is_local_docker():
+    client = MorphCloudClient()
+    TASK_CONFIG_TO_INSTANCE: dict[str, Instance] = {}
+
+# base 16GB: snapshot_woi80wxp
+
+COMMON_HASH_SNAPSHOTS = {
+    "50fe0fa7f3112e760d800a169864e63551781f9f44c31c1cac2601b6ddccf74c": "snapshot_zz9p7o68",  # intercode: 8G
+    "113d544eb164a0b0f3a63c84f923c6f2e4055b9d479fb498bdbfdb9b0e340c92": "snapshot_ocrc4kqc",  # default cybench: 16G
+    "b631dd95f372cbcc0e46276f27da8f803f36f7fa2101b00cd3cc533bce68061c": "snapshot_j4p37foh",
+    "de9ec2e81b6392b20c2ee1b933610bce352effabc991ada051435159746a41b7": "snapshot_7l8e0hgc",
+    "774b74068832a30266e7a4182ea2a9309a6ec4eed672b5e5d05b00a3a243722b": "snapshot_worbeggy",
+    "a9bd1ee7106f1c7ceef39b0d5b44af9e9892808ea27c29b534f472500f545190": "snapshot_6pdpxvq6",
+    "3bb4552d0c24dd2f2e25c23066f98e16ac67b656e204bde8a651fd0efe8bbbe2": "snapshot_mw7ivf14",
+    "c52234385063906c889eb6714cbbe8efb4874150346594cd38d7ebe12a88d785": "snapshot_t5vbkcxu",
+    "25e352652ed0594dbe9d0f739e8022666d5608b949ecb707fdfce4b5161c1a1b": "snapshot_d79op9ts",
+    "bdbf96fdf6430154716e39ada653fa4fa40609312730d0392f5dc341d91a809e": "snapshot_cfes5561",
+    "d544c4e58cdcc3f1b3d8bb0810f0d3a61304729e0918b9ac2786e89b049c24b6": "snapshot_hg6h2wnh",
+    "181ca879a3f1cf6f8d084fc75e2ce594bb8b5c50498dacbf4062c6679887a9c5": "snapshot_r20y822q",
+    "9e74803260a17c2364bb61c44af6ce4c975782f3c1d64a51256b2dbe81ef14ce": "snapshot_nnkwf458",
+    "fd14aae5fec846724483e1abac11090578005fd4f3a2076efbc3ea2c4fafefcd": "snapshot_w3l3z5np",
+    "cfcda5968edd0ccfd5a2f7525182d0b666d96ed47e5121cc4d0f4993764e197c": "snapshot_50vy3743",
+    "3d6624c0061acf4f32c85b9bc2461c63f335f91c6a42181102be541e547d04f2": "snapshot_dp6gt91r",
+    "e9ed8f46eb9455da23ad6aa893bd06c5fde3df30fb64ac07fde343f783d88d3e": "snapshot_jtiiuatq",
+    "f9a1078a02bc92804ad1150e7264b5f01827e24d91974941fabf6dee375d5ba4": "snapshot_th6kqw3z",
+    "9ec2c95b896a0a915f0636b30772e1e3b07a08b98571cf72339acb079191c243": "snapshot_g3j17qia",
+    "561dadca1127f227cfa26a621d98ff951ccacd13449f479781a612c9419e74ea": "snapshot_r1bz8mh3",
+    "846dc07f648e7437770792055ea1e384f3d432715ac33944932d968969d94b4f": "snapshot_a09um5n6",
+    "b472b76c20fd9b749f3f79d9cc06e91a6ad4ef10c9363beb8472298c9e530915": "snapshot_rvb2hnyq",
+    "f279dce707bf69b141864699174cc409b2ace5458fd935079c53ddd11a1510ba": "snapshot_q6vo0a41",
+    "72f9740f070bfcd59a1201921d3b04260492160de2243b415c34cf3cb0b77583": "snapshot_ptcboz9c",
+    "3d76044d97031b591709b5c7749332ff4556cc678827360a29e5312a0c4286ff": "snapshot_3p6ewffk",
+    "36c6c64dffed2d3c7058e65e3813ab904328f77316c9605ea715f450419c17ae": "snapshot_uozovu00",  # chunky: 24G
+}
 
 
 @sandboxenv(name="docker")
@@ -59,6 +96,8 @@ class DockerSandboxEnvironment(SandboxEnvironment):
     @classmethod
     def default_concurrency(cls) -> int | None:
         count = os.cpu_count() or 1
+        if not is_local_docker():
+            return 8  # TODO(vincent): temp while i fix morph instances
         return 2 * count
 
     @classmethod
@@ -73,8 +112,25 @@ class DockerSandboxEnvironment(SandboxEnvironment):
 
         try:
             # create project
+            env: dict[str, str] = {}
+
+            if not is_local_docker():
+                # compute the hash of the config contents
+                config_hash = hashlib.sha256(open(config, "rb").read()).hexdigest()
+
+                if config_hash in COMMON_HASH_SNAPSHOTS:
+                    print(f"{config_hash}||{config}||CACHED")
+                    return
+
+                print(f"{config_hash}||{config}||UNCACHED")
+
+                instance = client.instances.start(snapshot_id="snapshot_1aogfmjw")
+                env["DOCKER_HOST"] = f"ssh://{instance.id}@ssh.cloud.morph.so"
+
             project = await ComposeProject.create(
-                name=task_project_name(task_name), config=config
+                name=task_project_name(task_name),
+                config=config,
+                env=env,
             )
 
             # build containers which are out of date
@@ -103,7 +159,10 @@ class DockerSandboxEnvironment(SandboxEnvironment):
 
             # provide some space above task display
             print("")
-
+            if not is_local_docker():
+                print(f"{config_hash}||{config}||{instance.snapshot().id}")
+                COMMON_HASH_SNAPSHOTS[config_hash] = instance.snapshot().id
+                instance.stop()
         except BaseException as ex:
             await project_cleanup_shutdown(True)
             raise ex
@@ -129,10 +188,18 @@ class DockerSandboxEnvironment(SandboxEnvironment):
                 if key in config_text:
                     env[key] = str(value)
 
+        project_name = task_project_name(task_name)
+
+        if not is_local_docker():
+            config_hash = hashlib.sha256(open(config, "rb").read()).hexdigest()
+            instance = client.instances.start(
+                snapshot_id=COMMON_HASH_SNAPSHOTS[config_hash]
+            )
+            env["DOCKER_HOST"] = f"ssh://{instance.id}@ssh.cloud.morph.so"
+            TASK_CONFIG_TO_INSTANCE[project_name] = instance
+
         # create project
-        project = await ComposeProject.create(
-            name=task_project_name(task_name), config=config, env=env
-        )
+        project = await ComposeProject.create(name=project_name, config=config, env=env)
 
         try:
             # enumerate the services that will be created
@@ -205,6 +272,10 @@ class DockerSandboxEnvironment(SandboxEnvironment):
             )._project
             # cleanup the project
             await project_cleanup(project=project, quiet=True)
+            if not is_local_docker():
+                instance = TASK_CONFIG_TO_INSTANCE[project.name]
+                client.instances.stop(instance.id)
+                del TASK_CONFIG_TO_INSTANCE[project.name]
 
     @classmethod
     async def task_cleanup(
@@ -442,7 +513,7 @@ class DockerSandboxEnvironment(SandboxEnvironment):
                     "remote-containers.attachToRunningContainer",
                     container,
                 ],
-                ports=await get_ports_info(container),
+                ports=await get_ports_info(container, self._project.env),
                 container=container,
             )
         # error (not currently running)
@@ -474,7 +545,9 @@ async def container_working_dir(
         return default
 
 
-async def get_ports_info(container: str) -> list[PortMapping] | None:
+async def get_ports_info(
+    container: str, env: dict[str, str]
+) -> list[PortMapping] | None:
     try:
         result = await subprocess(
             [
@@ -485,6 +558,7 @@ async def get_ports_info(container: str) -> list[PortMapping] | None:
                 "{{json .NetworkSettings.Ports}}",
             ],
             timeout=60,
+            env=env,
         )
 
         if not result.success:

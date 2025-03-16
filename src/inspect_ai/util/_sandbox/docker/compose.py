@@ -121,10 +121,12 @@ async def compose_check_running(
 
 async def compose_ps(
     project: ComposeProject,
-    status: Literal[
-        "paused", "restarting", "removing", "running", "dead", "created", "exited"
-    ]
-    | None = None,
+    status: (
+        Literal[
+            "paused", "restarting", "removing", "running", "dead", "created", "exited"
+        ]
+        | None
+    ) = None,
     all: bool = False,
 ) -> list[dict[str, Any]]:
     command = ["ps", "--format", "json"]
@@ -247,6 +249,7 @@ async def compose_cleanup_images(
                     ["docker", "images", "-q", image],
                     timeout=timeout,
                     capture_output=True,
+                    env=project.env or {},
                 )
 
                 remove_image = True
@@ -259,6 +262,7 @@ async def compose_cleanup_images(
                         ["docker", "rmi", image],
                         timeout=timeout,
                         capture_output=True,
+                        env=project.env or {},
                     )
                     if not result.success:
                         msg = f"Failed to cleanup docker image {result.stderr}"
@@ -283,6 +287,8 @@ async def compose_command(
 
     # env to forward
     env = project.env if (project.env and forward_env) else {}
+    if project.env and "DOCKER_HOST" in project.env and not forward_env:
+        env["DOCKER_HOST"] = project.env["DOCKER_HOST"]
 
     # ansi (apply global override)
     if display_type() == "plain":

@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from inspect_ai._util.error import PrerequisiteError
 from inspect_ai.util._subprocess import subprocess
+from inspect_ai.util._sandbox.docker.util import is_local_docker
 
 logger = getLogger(__name__)
 
@@ -34,6 +35,9 @@ DOCKER_ENGINE_REQUIRED_VERSION = "24.0.6"
 
 
 async def validate_docker_engine(version: str = DOCKER_ENGINE_REQUIRED_VERSION) -> None:
+    if not is_local_docker():
+        return
+
     def parse_version(stdout: str) -> semver.Version:
         version = DockerVersion(**json.loads(stdout)).Client.Version
         return semver.Version.parse(version)
@@ -56,6 +60,9 @@ DOCKER_COMPOSE_REQUIRED_VERSION_PULL_POLICY = "2.22.0"
 async def validate_docker_compose(
     version: str = DOCKER_COMPOSE_REQUIRED_VERSION,
 ) -> None:
+    if not is_local_docker():
+        return
+
     def parse_version(stdout: str) -> semver.Version:
         version = json.loads(stdout)["version"].removeprefix("v").split("+")[0]
         return semver.Version.parse(version)
