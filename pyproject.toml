@@ -156,3 +156,4 @@ dist = ["twine", "build"]
 
 [tool.uv]
 managed = false
+cache-keys = [{ file = "pyproject.toml" }, { file = "requirements.txt" }]
