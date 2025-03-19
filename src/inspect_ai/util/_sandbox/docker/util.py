@@ -97,4 +97,4 @@ def is_inspect_project(name: str) -> bool:
 
 
 def is_local_docker():
-    return os.environ.get("MORPH_API_KEY", None) is None
+    return os.environ.get("MORPH_API_KEY", "") == ""

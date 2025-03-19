@@ -50,9 +50,9 @@ import asyncio
 
 logger = getLogger(__name__)
 
-from morphcloud.api import MorphCloudClient, Instance
-
 if not is_local_docker():
+    from morphcloud.api import MorphCloudClient, Instance
+
     client = MorphCloudClient()
     TASK_CONFIG_TO_INSTANCE: dict[str, Instance] = {}
 
