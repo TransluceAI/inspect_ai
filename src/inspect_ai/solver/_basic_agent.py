@@ -5,7 +5,11 @@ from typing_extensions import TypedDict, Unpack
 
 from inspect_ai.model._cache import CachePolicy
 from inspect_ai.model._call_tools import call_tools
-from inspect_ai.model._chat_message import ChatMessageTool, ChatMessageUser
+from inspect_ai.model._chat_message import (
+    ChatMessageAssistant,
+    ChatMessageTool,
+    ChatMessageUser,
+)
 from inspect_ai.model._model import get_model
 from inspect_ai.scorer._metric import Score, ValueToFloat, value_to_float
 from inspect_ai.scorer._score import score
@@ -56,8 +60,9 @@ def basic_agent(
     token_limit: int | None = None,
     max_tool_output: int | None = None,
     score_value: ValueToFloat | None = None,
-    incorrect_message: str
-    | Callable[[TaskState, list[Score]], str] = DEFAULT_INCORRECT_MESSAGE,
+    incorrect_message: (
+        str | Callable[[TaskState, list[Score]], str]
+    ) = DEFAULT_INCORRECT_MESSAGE,
     continue_message: str = DEFAULT_CONTINUE_MESSAGE,
     submit_name: str = DEFAULT_SUBMIT_NAME,
     submit_description: str = DEFAULT_SUBMIT_DESCRIPTION,
@@ -166,6 +171,48 @@ def basic_agent(
 
             # track attempts
             attempts = 0
+
+            if len(state.messages) > 0:
+                last_message = state.messages[-1]
+                if isinstance(last_message, ChatMessageAssistant):
+                    if last_message.tool_calls:
+                        # call tool functions
+                        tool_results = await call_tools(
+                            last_message,
+                            state.tools,
+                            max_output=max_tool_output,
+                        )
+                        state.messages.extend(tool_results)
+                        state.dump_messages_to_stream()
+
+                        # was an answer submitted?
+                        answer = submission(tool_results)
+                        if answer:
+                            # set the output to the answer for scoring
+                            state.output.completion = answer
+
+                            # exit if we are at max_attempts
+                            attempts += 1
+                            if attempts >= max_attempts:
+                                state.completed = True
+                                return state
+
+                            # exit if the submission is successful
+                            answer_scores = await score(state)
+                            if score_value_fn(answer_scores[0].value) == 1.0:
+                                state.completed = True
+                                return state
+
+                            # otherwise notify the model that it was incorrect and continue
+                            else:
+                                response_message = (
+                                    incorrect_message(state, answer_scores)
+                                    if callable(incorrect_message)
+                                    else incorrect_message
+                                )
+                                state.messages.append(
+                                    ChatMessageUser(content=response_message)
+                                )
 
             # main loop (state.completed checks message_limit and token_limit)
             while not state.completed:
