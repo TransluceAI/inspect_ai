@@ -18,10 +18,9 @@ def task_panel(
     profile: TaskProfile,
     show_model: bool,
     body: RenderableType,
-    subtitle: RenderableType
-    | str
-    | Tuple[RenderableType | str, RenderableType | str]
-    | None,
+    subtitle: (
+        RenderableType | str | Tuple[RenderableType | str, RenderableType | str] | None
+    ),
     footer: RenderableType | tuple[RenderableType, RenderableType] | None,
     log_location: str | None,
 ) -> Panel:
@@ -104,7 +103,11 @@ def task_panel(
 
 def to_renderable(item: RenderableType | str, style: str = "") -> RenderableType:
     if isinstance(item, str):
-        return Text.from_markup(item, style=style)
+        try:
+            return Text.from_markup(item, style=style)
+        except Exception as _:
+            # Fallback to plain text if markup parsing fails
+            return Text(item, style=style)
     else:
         return item
 
