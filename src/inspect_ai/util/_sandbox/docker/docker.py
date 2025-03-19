@@ -180,8 +180,9 @@ class DockerSandboxEnvironment(SandboxEnvironment):
             # provide some space above task display
             print("")
             if not is_local_docker():
-                print(f"{config_hash}||{config}||{instance.snapshot().id}")
-                COMMON_HASH_SNAPSHOTS[config_hash] = instance.snapshot().id
+                snapshot_id = instance.snapshot().id
+                print(f"{config_hash}||{config}||{snapshot_id}")
+                COMMON_HASH_SNAPSHOTS[config_hash] = snapshot_id
                 instance.stop()
         except BaseException as ex:
             await project_cleanup_shutdown(True)
