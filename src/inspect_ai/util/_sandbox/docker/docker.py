@@ -46,6 +46,7 @@ from .config import CONFIG_FILES, DOCKERFILE
 from .internal import build_internal_image, is_internal_image
 from .prereqs import validate_prereqs
 from .util import ComposeProject, is_local_docker, task_project_name
+import asyncio
 
 logger = getLogger(__name__)
 
@@ -55,10 +56,29 @@ if not is_local_docker():
     client = MorphCloudClient()
     TASK_CONFIG_TO_INSTANCE: dict[str, Instance] = {}
 
+    async def create_instance(snapshot_id: str, project_name: str) -> Instance:
+        delay = 1
+        for iter in range(5):
+            try:
+                instance = client.instances.start(snapshot_id=snapshot_id)
+                TASK_CONFIG_TO_INSTANCE[project_name] = instance
+                return instance
+            except Exception as e:
+                logger.warning(
+                    f"Instance creation failed (attempt {iter+1}/5), retrying in {delay}s: {e}"
+                )
+                await asyncio.sleep(delay)
+                delay *= 2
+        raise Exception(
+            "Failed to set up experiment after 5 attempts - we are out of CPU capacity"
+        )
+
+
 # base 16GB: snapshot_y3o7h1cy
 
 COMMON_HASH_SNAPSHOTS = {
     "50fe0fa7f3112e760d800a169864e63551781f9f44c31c1cac2601b6ddccf74c": "snapshot_yjgb4se5",  # intercode: 8G
+    "0e76ec7f3f97d9c56b897af2d7da9c60f192bd1cbe0b8963fe89e19e8ef34a46": "snapshot_sm0n0bm1",  # intercode new: 8G
     "113d544eb164a0b0f3a63c84f923c6f2e4055b9d479fb498bdbfdb9b0e340c92": "snapshot_v1tg2zg0",  # default cybench: 16G
     "b631dd95f372cbcc0e46276f27da8f803f36f7fa2101b00cd3cc533bce68061c": "snapshot_57sotko2",
     "de9ec2e81b6392b20c2ee1b933610bce352effabc991ada051435159746a41b7": "snapshot_zfmp9soe",
@@ -192,11 +212,10 @@ class DockerSandboxEnvironment(SandboxEnvironment):
 
         if not is_local_docker():
             config_hash = hashlib.sha256(open(config, "rb").read()).hexdigest()
-            instance = client.instances.start(
-                snapshot_id=COMMON_HASH_SNAPSHOTS[config_hash]
+            instance = await create_instance(
+                COMMON_HASH_SNAPSHOTS[config_hash], project_name
             )
             env["DOCKER_HOST"] = f"ssh://{instance.id}@ssh.cloud.morph.so"
-            TASK_CONFIG_TO_INSTANCE[project_name] = instance
 
         # create project
         project = await ComposeProject.create(name=project_name, config=config, env=env)
@@ -271,7 +290,10 @@ class DockerSandboxEnvironment(SandboxEnvironment):
         )._project
         if not interrupted:
             # cleanup the project
-            await project_cleanup(project=project, quiet=True)
+            try:
+                await project_cleanup(project=project, quiet=True)
+            except Exception as e:
+                logger.warning(f"Failed to cleanup project: {e}")
         if not is_local_docker():
             instance = TASK_CONFIG_TO_INSTANCE[project.name]
             client.instances.stop(instance.id)
