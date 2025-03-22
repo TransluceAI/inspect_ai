@@ -9,6 +9,7 @@ from inspect_ai.model import (
 from inspect_ai.model._cache import epoch
 from inspect_ai.solver import TaskState
 from inspect_ai.tool import ToolFunction
+from inspect_ai.model import ChatMessageAssistant
 
 
 async def task_generate(
@@ -26,6 +27,26 @@ async def task_generate(
         # we'd cache the same response for every single epoch, which would
         # completely defeat the point!
         epoch.set(state.epoch)
+
+        # <kevin hack>
+        # this resolves the case where the first message is a tool call but the tool call isn't run
+        # resolve tool calls at beginning if first message is a tool call
+        last_message = state.messages[-1] if state.messages else None
+        if isinstance(last_message, ChatMessageAssistant) and last_message.tool_calls:
+            # call tools and append messages to state
+            state.messages.extend(
+                await call_tools(last_message, state.tools, config.max_tool_output)
+            )
+
+            # check for completed or only executing a single tool call
+            if state.completed or tool_calls == "single":
+                return state
+
+            # if a tool_call was forced set tool_choice to 'auto'
+            # (otherwise it will get forced over and over again)
+            if isinstance(tool_choice, ToolFunction):
+                tool_choice = "auto"
+        # </kevin hack>
 
         # call the model
         state.output = await model.generate(
