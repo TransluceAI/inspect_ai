@@ -16,7 +16,7 @@ from .._registry import modelapi
 def groq() -> type[ModelAPI]:
     FEATURE = "Groq API"
     PACKAGE = "groq"
-    MIN_VERSION = "0.11.0"
+    MIN_VERSION = "0.16.0"
 
     # verify we have the package
     try:
@@ -48,7 +48,7 @@ def openai() -> type[ModelAPI]:
 def anthropic() -> type[ModelAPI]:
     FEATURE = "Anthropic API"
     PACKAGE = "anthropic"
-    MIN_VERSION = "0.29.0"
+    MIN_VERSION = "0.47.1"
 
     # verify we have the package
     try:
@@ -93,8 +93,8 @@ def vertex() -> type[ModelAPI]:
 @modelapi(name="google")
 def google() -> type[ModelAPI]:
     FEATURE = "Google API"
-    PACKAGE = "google-generativeai"
-    MIN_VERSION = "0.8.4"
+    PACKAGE = "google-genai"
+    MIN_VERSION = "1.2.0"
 
     # workaround log spam
     # https://github.com/ray-project/ray/issues/24917
@@ -102,7 +102,7 @@ def google() -> type[ModelAPI]:
 
     # verify we have the package
     try:
-        import google.generativeai  # type: ignore  # noqa: F401
+        import google.genai  # type: ignore  # noqa: F401
     except ImportError:
         raise pip_dependency_error(FEATURE, [PACKAGE])
 
@@ -110,9 +110,9 @@ def google() -> type[ModelAPI]:
     verify_required_version(FEATURE, PACKAGE, MIN_VERSION)
 
     # in the clear
-    from .google import GoogleAPI
+    from .google import GoogleGenAIAPI
 
-    return GoogleAPI
+    return GoogleGenAIAPI
 
 
 @modelapi(name="hf")
@@ -148,7 +148,7 @@ def cf() -> type[ModelAPI]:
 def mistral() -> type[ModelAPI]:
     FEATURE = "Mistral API"
     PACKAGE = "mistralai"
-    MIN_VERSION = "1.2.0"
+    MIN_VERSION = "1.5.1"
 
     # verify we have the package
     try:
@@ -198,6 +198,17 @@ def ollama() -> type[ModelAPI]:
     return OllamaAPI
 
 
+@modelapi(name="openrouter")
+def openrouter() -> type[ModelAPI]:
+    # validate
+    validate_openai_client("OpenRouter API")
+
+    # in the clear
+    from .openrouter import OpenRouterAPI
+
+    return OpenRouterAPI
+
+
 @modelapi(name="llama-cpp-python")
 def llama_cpp_python() -> type[ModelAPI]:
     # validate
@@ -239,6 +250,13 @@ def mockllm() -> type[ModelAPI]:
     return MockLLM
 
 
+@modelapi(name="none")
+def none() -> type[ModelAPI]:
+    from .none import NoModel
+
+    return NoModel
+
+
 @modelapi("goodfire")
 def goodfire() -> type[ModelAPI]:
     """Get the Goodfire API provider."""
@@ -264,7 +282,7 @@ def goodfire() -> type[ModelAPI]:
 def validate_openai_client(feature: str) -> None:
     FEATURE = feature
     PACKAGE = "openai"
-    MIN_VERSION = "1.58.1"
+    MIN_VERSION = "1.68.0"
 
     # verify we have the package
     try:

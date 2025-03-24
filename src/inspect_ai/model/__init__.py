@@ -4,6 +4,7 @@ from inspect_ai._util.content import (
     Content,
     ContentAudio,
     ContentImage,
+    ContentReasoning,
     ContentText,
     ContentVideo,
 )
@@ -21,11 +22,12 @@ from ._call_tools import call_tools
 from ._chat_message import (
     ChatMessage,
     ChatMessageAssistant,
+    ChatMessageBase,
     ChatMessageSystem,
     ChatMessageTool,
     ChatMessageUser,
 )
-from ._generate_config import GenerateConfig, GenerateConfigArgs
+from ._generate_config import GenerateConfig, GenerateConfigArgs, ResponseSchema
 from ._model import (
     Model,
     ModelAPI,
@@ -47,13 +49,16 @@ from ._registry import modelapi
 __all__ = [
     "GenerateConfig",
     "GenerateConfigArgs",
+    "ResponseSchema",
     "CachePolicy",
     "ContentAudio",
     "ContentImage",
+    "ContentReasoning",
     "ContentText",
     "ContentVideo",
     "Content",
     "ChatMessage",
+    "ChatMessageBase",
     "ChatMessageSystem",
     "ChatMessageUser",
     "ChatMessageAssistant",

@@ -1,6 +1,6 @@
-import asyncio
 import inspect
 import json
+import sys
 import types
 from dataclasses import is_dataclass
 from logging import getLogger
@@ -22,7 +22,12 @@ from typing import (
     is_typeddict,
 )
 
+if sys.version_info < (3, 11):
+    from exceptiongroup import ExceptionGroup
+
+import anyio
 import yaml
+from anyio.streams.memory import MemoryObjectSendStream
 from jsonschema import Draft7Validator
 from pydantic import BaseModel
 
@@ -36,6 +41,7 @@ from inspect_ai._util.content import (
 from inspect_ai._util.format import format_function_call
 from inspect_ai._util.text import truncate_string_to_bytes
 from inspect_ai._util.trace import trace_action
+from inspect_ai._util.working import sample_waiting_time
 from inspect_ai.model._conversation import conversation_tool_mesage
 from inspect_ai.tool import Tool, ToolCall, ToolError, ToolInfo
 from inspect_ai.tool._tool import ToolApprovalError, ToolParsingError
@@ -79,7 +85,10 @@ async def call_tools(
 
         tdefs = tool_defs(tools)
 
-        async def call_tool_task(call: ToolCall) -> tuple[ChatMessageTool, ToolEvent]:
+        async def call_tool_task(
+            call: ToolCall,
+            send_stream: MemoryObjectSendStream[tuple[ChatMessageTool, ToolEvent]],
+        ) -> None:
             # create a transript for this call
             init_transcript(Transcript(name=call.function))
 
@@ -133,7 +142,8 @@ async def call_tools(
             ):
                 content: str | list[Content] = [result]
             elif isinstance(result, list) and (
-                isinstance(
+                len(result) == 0
+                or isinstance(
                     result[0], ContentText | ContentImage | ContentAudio | ContentVideo
                 )
             ):
@@ -157,6 +167,7 @@ async def call_tools(
                 id=call.id,
                 function=call.function,
                 arguments=call.arguments,
+                internal_name=call.internal_name,
                 result=content,
                 truncated=truncated,
                 view=call.view,
@@ -164,60 +175,77 @@ async def call_tools(
                 events=list(transcript().events),
             )
 
-            # return message and event
-            return ChatMessageTool(
-                content=content,
-                tool_call_id=call.id,
-                function=call.function,
-                error=tool_error,
-            ), event
+            # yield message and event
+            async with send_stream:
+                await send_stream.send(
+                    (
+                        ChatMessageTool(
+                            content=content,
+                            tool_call_id=call.id,
+                            function=call.function,
+                            internal_name=call.internal_name,
+                            error=tool_error,
+                        ),
+                        event,
+                    )
+                )
 
         # call tools
         tool_messages: list[ChatMessageTool] = []
         for call in message.tool_calls:
-            # create the task
-            task = asyncio.create_task(call_tool_task(call))
-
             # create pending tool event and add it to the transcript
+            # (record the waiting time for the sample so we can compare
+            # it at the end to deduce total waiting time inside the tool
+            # call (in turn used to calculate working time)
+            waiting_time_start = sample_waiting_time()
             event = ToolEvent(
                 id=call.id,
                 function=call.function,
                 arguments=call.arguments,
+                internal_name=call.internal_name,
                 view=call.view,
                 pending=True,
             )
-            event.set_task(task)
             transcript()._event(event)
 
-            # execute the tool call. if the operator cancelled the
+            # execute the tool call. if the operator cancels the
             # tool call then synthesize the appropriate message/event
+            send_stream, receive_stream = anyio.create_memory_object_stream[
+                tuple[ChatMessageTool, ToolEvent]
+            ]()
             try:
-                tool_message, result_event = await task
-            except asyncio.CancelledError:
-                if event.cancelled:
-                    tool_message = ChatMessageTool(
-                        content="",
-                        function=call.function,
-                        tool_call_id=call.id,
-                        error=ToolCallError(
-                            "timeout", "Command timed out before completing."
-                        ),
-                    )
-                    result_event = ToolEvent(
-                        id=call.id,
-                        function=call.function,
-                        arguments=call.arguments,
-                        result=tool_message.content,
-                        truncated=None,
-                        view=call.view,
-                        error=tool_message.error,
-                        events=[],
-                    )
-                    transcript().info(
-                        f"Tool call '{call.function}' was cancelled by operator."
-                    )
-                else:
-                    raise
+                async with anyio.create_task_group() as tg:
+                    tg.start_soon(call_tool_task, call, send_stream)
+                    event._set_cancel_fn(tg.cancel_scope.cancel)
+                    async with receive_stream:
+                        tool_message, result_event = await receive_stream.receive()
+            except ExceptionGroup as ex:
+                raise ex.exceptions[0]
+
+            if event.cancelled:
+                tool_message = ChatMessageTool(
+                    content="",
+                    function=call.function,
+                    internal_name=call.internal_name,
+                    tool_call_id=call.id,
+                    error=ToolCallError(
+                        "timeout", "Command timed out before completing."
+                    ),
+                )
+                result_event = ToolEvent(
+                    id=call.id,
+                    function=call.function,
+                    arguments=call.arguments,
+                    internal_name=call.internal_name,
+                    result=tool_message.content,
+                    truncated=None,
+                    view=call.view,
+                    error=tool_message.error,
+                    events=[],
+                )
+                transcript().info(
+                    f"Tool call '{call.function}' was cancelled by operator."
+                )
 
             # update return messages
             tool_messages.append(tool_message)
@@ -226,11 +254,13 @@ async def call_tools(
             conversation_tool_mesage(tool_message)
 
             # update the event with the results
-            event.set_result(
+            waiting_time_end = sample_waiting_time()
+            event._set_result(
                 result=result_event.result,
                 truncated=result_event.truncated,
                 error=result_event.error,
                 events=result_event.events,
+                waiting_time=waiting_time_end - waiting_time_start,
             )
 
         # return tool messages
@@ -406,7 +436,7 @@ def tool_param(type_hint: Type[Any], input: Any) -> Any:
             return tuple(input)
     elif origin is dict or origin is Dict:
         if args and len(args) > 1:
-            return {k: tool_param(args[1], v) for k, v in input}
+            return {k: tool_param(args[1], v) for k, v in input.items()}
         else:
             return input
     elif origin is Union or origin is types.UnionType:
@@ -480,6 +510,13 @@ def tool_parse_error_message(arguments: str, ex: Exception) -> str:
 def parse_tool_call(
     id: str, function: str, arguments: str, tools: list[ToolInfo] | None = None
 ) -> ToolCall:
+    """Parse a tool call from a JSON payload.
+
+    Note that this function doesn't know about internal tool names so the caller
+    should ammend the returned `ToolCall` by mapping the parsed `function` field from
+    from an internal name to an inspect tool name and fixing up the `ToolCall` object
+    as required to reflect this change.
+    """
     error: str | None = None
     arguments_dict: dict[str, Any] = {}
 

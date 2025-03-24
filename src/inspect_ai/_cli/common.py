@@ -9,17 +9,19 @@ from inspect_ai._util.constants import (
     ALL_LOG_LEVELS,
     DEFAULT_DISPLAY,
     DEFAULT_LOG_LEVEL,
-    DEFAULT_LOG_LEVEL_TRANSCRIPT,
 )
+from inspect_ai._util.dotenv import init_cli_env
 from inspect_ai.util._display import init_display_type
+
+from .util import parse_cli_args
 
 
 class CommonOptions(TypedDict):
     log_level: str
-    log_level_transcript: str
     log_dir: str
     display: Literal["full", "conversation", "rich", "plain", "none"]
     no_ansi: bool | None
+    env: tuple[str] | None
     debug: bool
     debug_port: int
     debug_errors: bool
@@ -35,16 +37,6 @@ def log_level_options(func: Callable[..., Any]) -> Callable[..., click.Context]:
         default=DEFAULT_LOG_LEVEL,
         envvar="INSPECT_LOG_LEVEL",
         help=f"Set the log level (defaults to '{DEFAULT_LOG_LEVEL}')",
-    )
-    @click.option(
-        "--log-level-transcript",
-        type=click.Choice(
-            [level.lower() for level in ALL_LOG_LEVELS],
-            case_sensitive=False,
-        ),
-        default=DEFAULT_LOG_LEVEL_TRANSCRIPT,
-        envvar="INSPECT_LOG_LEVEL_TRANSCRIPT",
-        help=f"Set the log level of the transcript (defaults to '{DEFAULT_LOG_LEVEL_TRANSCRIPT}')",
     )
     @functools.wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> click.Context:
@@ -81,6 +73,13 @@ def common_options(func: Callable[..., Any]) -> Callable[..., click.Context]:
         envvar="INSPECT_NO_ANSI",
     )
     @click.option(
+        "--env",
+        multiple=True,
+        type=str,
+        envvar="INSPECT_EVAL_ENV",
+        help="Define an environment variable e.g. --env NAME=value (--env can be specified multiple times)",
+    )
+    @click.option(
         "--debug", is_flag=True, envvar="INSPECT_DEBUG", help="Wait to attach debugger"
     )
     @click.option(
@@ -104,6 +103,10 @@ def common_options(func: Callable[..., Any]) -> Callable[..., click.Context]:
 
 
 def process_common_options(options: CommonOptions) -> None:
+    # set environment variables
+    env_args = parse_cli_args(options["env"])
+    init_cli_env(env_args)
+
     # propagate display
     if options["no_ansi"]:
         display = "rich"

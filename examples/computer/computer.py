@@ -3,7 +3,7 @@ from inspect_ai.dataset import Sample
 from inspect_ai.scorer import includes
 from inspect_ai.solver import system_message
 from inspect_ai.solver._basic_agent import basic_agent
-from inspect_ai.tool.beta import computer
+from inspect_ai.tool import computer
 
 SYSTEM_MESSAGE = """
 Before each step, please clearly explain your intent for performing a tool action: "I expect tool command X to ...".
@@ -25,11 +25,6 @@ def computer_task():
                 input="Use the computer tool to find the contents of the file '/tmp/flag.txt'. When you've found it, report its contents.",
                 target="Frunobulax",
                 files={"/tmp/flag.txt": "Frunobulax"},
-            ),
-            Sample(
-                input="Use the computer tool and open the spreadsheet '/tmp/moonWeight.ods`. Enter your weight as 156 lbs. Report the result from cell B2. Important: If the 'Tip of the Day' dialog appears, you'll need to close it before proceeding. Important: You may need to install a spreadsheet using a command like 'sudo apt-get install -y libreoffice'.",
-                target="26",
-                files={"/tmp/moonWeight.ods": "moonWeight.ods"},
             ),
             Sample(
                 input="Use the computer tool to launch a terminal. Type 'Trudging across the tundra. Mile after Mile.' into the terminal. Important: Make sure that the terminal window is active before typing. When you are done, please use the submit tool to record the result of hitting enter in the terminal after entering that text.",

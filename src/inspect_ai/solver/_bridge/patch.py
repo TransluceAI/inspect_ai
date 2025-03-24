@@ -11,11 +11,12 @@ from openai._types import ResponseT
 from openai.types.chat import (
     ChatCompletion,
     ChatCompletionMessageParam,
+    ChatCompletionToolChoiceOptionParam,
     ChatCompletionToolParam,
 )
 from shortuuid import uuid
 
-from inspect_ai.model._generate_config import GenerateConfig
+from inspect_ai.model._generate_config import GenerateConfig, ResponseSchema
 from inspect_ai.model._model import get_model
 from inspect_ai.model._openai import (
     chat_messages_from_openai,
@@ -23,8 +24,10 @@ from inspect_ai.model._openai import (
     openai_completion_usage,
 )
 from inspect_ai.solver._task_state import sample_state
+from inspect_ai.tool._tool_choice import ToolChoice, ToolFunction
 from inspect_ai.tool._tool_info import ToolInfo
 from inspect_ai.tool._tool_params import ToolParams
+from inspect_ai.util._json import JSONSchema
 
 
 @contextlib.asynccontextmanager
@@ -72,8 +75,6 @@ def init_openai_request_patch() -> None:
                 _patch_enabled.get()
                 # completions request
                 and options.url == "/chat/completions"
-                # call to openai not another service (e.g. TogetherAI)
-                and self.base_url == "https://api.openai.com/v1/"
             ):
                 # must also be an explicit request for an inspect model
                 json_data = cast(dict[str, Any], options.json_data)
@@ -115,6 +116,20 @@ async def inspect_model_request(
             )
         )
 
+    # convert openai tool choice to inspect tool_choice
+    inspect_tool_choice: ToolChoice | None = None
+    tool_choice: ChatCompletionToolChoiceOptionParam | None = json_data.get(
+        "tool_choice", None
+    )
+    if tool_choice is not None:
+        match tool_choice:
+            case "auto" | "none":
+                inspect_tool_choice = tool_choice
+            case "required":
+                inspect_tool_choice = "any"
+            case _:
+                inspect_tool_choice = ToolFunction(name=tool_choice["function"]["name"])
+
     # resolve model
     if model_name == "inspect":
         model = get_model()
@@ -124,6 +139,7 @@ async def inspect_model_request(
     output = await model.generate(
         input=input,
         tools=inspect_tools,
+        tool_choice=inspect_tool_choice,
         config=generate_config_from_openai(options),
     )
 
@@ -166,5 +182,17 @@ def generate_config_from_openai(options: FinalRequestOptions) -> GenerateConfig:
     config.logit_bias = json_data.get("logit_bias", None)
     config.parallel_tool_calls = json_data.get("parallel_tool_calls", None)
     config.reasoning_effort = json_data.get("reasoning_effort", None)
+
+    # response format
+    response_format: dict[str, Any] | None = json_data.get("response_format", None)
+    if response_format is not None:
+        json_schema: dict[str, Any] | None = response_format.get("json_schema", None)
+        if json_schema is not None:
+            config.response_schema = ResponseSchema(
+                name=json_schema.get("name", "schema"),
+                description=json_schema.get("description", None),
+                json_schema=JSONSchema.model_validate(json_schema.get("schema", {})),
+                strict=json_schema.get("strict", None),
+            )
 
     return config

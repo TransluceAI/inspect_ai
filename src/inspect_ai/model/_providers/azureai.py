@@ -27,11 +27,16 @@ from azure.ai.inference.models import (
     UserMessage,
 )
 from azure.core.credentials import AzureKeyCredential
-from azure.core.exceptions import AzureError, HttpResponseError
+from azure.core.exceptions import (
+    AzureError,
+    HttpResponseError,
+    ServiceResponseError,
+)
 from typing_extensions import override
 
 from inspect_ai._util.constants import DEFAULT_MAX_TOKENS
 from inspect_ai._util.content import Content, ContentImage, ContentText
+from inspect_ai._util.http import is_retryable_http_status
 from inspect_ai._util.images import file_as_data_uri
 from inspect_ai.tool import ToolChoice, ToolInfo
 from inspect_ai.tool._tool_call import ToolCall
@@ -46,7 +51,6 @@ from .._chat_message import (
     ChatMessageUser,
 )
 from .._generate_config import GenerateConfig
-from .._image import image_url_filter
 from .._model import ModelAPI
 from .._model_call import ModelCall
 from .._model_output import (
@@ -55,6 +59,7 @@ from .._model_output import (
     ModelUsage,
     StopReason,
 )
+from .._openai import openai_media_filter
 from .util import (
     environment_prerequisite_error,
     model_base_url,
@@ -124,6 +129,11 @@ class AzureAIAPI(ModelAPI):
         self.endpoint_url = endpoint_url
         self.model_args = model_args
 
+    @override
+    async def close(self) -> None:
+        # client is created/destroyed each time in generate()
+        pass
+
     async def generate(
         self,
         input: list[ChatMessage],
@@ -172,7 +182,7 @@ class AzureAIAPI(ModelAPI):
                     else None,
                 ),
                 response=response.as_dict() if response else {},
-                filter=image_url_filter,
+                filter=openai_media_filter,
             )
 
         # make call
@@ -227,14 +237,11 @@ class AzureAIAPI(ModelAPI):
             return DEFAULT_MAX_TOKENS
 
     @override
-    def is_rate_limit(self, ex: BaseException) -> bool:
-        if isinstance(ex, HttpResponseError):
-            return (
-                ex.status_code == 408
-                or ex.status_code == 409
-                or ex.status_code == 429
-                or ex.status_code == 500
-            )
+    def should_retry(self, ex: Exception) -> bool:
+        if isinstance(ex, HttpResponseError) and ex.status_code is not None:
+            return is_retryable_http_status(ex.status_code)
+        elif isinstance(ex, ServiceResponseError):
+            return True
         else:
             return False
 

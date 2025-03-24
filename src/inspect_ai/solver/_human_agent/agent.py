@@ -1,6 +1,9 @@
-import asyncio
+from typing import cast
+
+import anyio
 
 from inspect_ai.util import display_type, input_panel, sandbox
+from inspect_ai.util._sandbox.events import SandboxEnvironmentProxy
 
 from .._solver import Generate, Solver, solver
 from .._task_state import TaskState
@@ -30,20 +33,17 @@ def human_agent(
     using a VS Code Window or Terminal.
 
     Args:
-       answer (bool | str): Is an explicit answer required for this
-          task or is it scored based on files in the container? Pass a
-          `str` with a regex to validate that the answer matches
-          the expected format.
-       intermediate_scoring (bool): Allow the human agent to
-          check their score while working.
-       record_session (bool): Record all user commands and outputs in
-          the sandbox bash session.
+       answer: Is an explicit answer required for this task or is it scored
+          based on files in the container? Pass a `str` with a regex to validate
+          that the answer matches the expected format.
+       intermediate_scoring: Allow the human agent to check their score while working.
+       record_session: Record all user commands and outputs in the sandbox bash session.
 
     Returns:
        Solver: Human agent solver.
     """
     # we can only run one human agent interaction at a time (use lock to enforce)
-    agent_lock = asyncio.Lock()
+    agent_lock = anyio.Lock()
 
     async def solve(state: TaskState, generate: Generate) -> TaskState:
         async with agent_lock:
@@ -59,19 +59,21 @@ def human_agent(
 
             # helper function to run the agent (called for fullscreen vs. fallback below)
             async def run_human_agent(view: HumanAgentView) -> TaskState:
-                # create agent commands
-                commands = human_agent_commands(
-                    state, answer, intermediate_scoring, record_session
-                )
+                sandbox_proxy = cast(SandboxEnvironmentProxy, sandbox())
+                with sandbox_proxy.no_events():
+                    # create agent commands
+                    commands = human_agent_commands(
+                        state, answer, intermediate_scoring, record_session
+                    )
 
-                # install agent tools
-                await install_human_agent(state, commands, record_session)
+                    # install agent tools
+                    await install_human_agent(state, commands, record_session)
 
-                # hookup the view ui
-                view.connect(connection)
+                    # hookup the view ui
+                    view.connect(connection)
 
-                # run sandbox service
-                return await run_human_agent_service(state, commands, view)
+                    # run sandbox service
+                    return await run_human_agent_service(state, commands, view)
 
             # support both fullscreen ui and fallback
             if display_type() == "full":

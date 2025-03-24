@@ -1,5 +1,3 @@
-import asyncio
-import contextlib
 import datetime
 import io
 import os
@@ -9,15 +7,18 @@ import unicodedata
 from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, AsyncIterator, BinaryIO, Iterator, Literal, cast, overload
+from typing import Any, BinaryIO, Iterator, Literal, cast, overload
 from urllib.parse import urlparse
 
 import fsspec  # type: ignore  # type: ignore
-from fsspec.asyn import AsyncFileSystem  # type: ignore
 from fsspec.core import split_protocol  # type: ignore  # type: ignore
 from fsspec.implementations.local import make_path_posix  # type: ignore
 from pydantic import BaseModel
 from s3fs import S3FileSystem  # type: ignore
+from shortuuid import uuid
+
+from inspect_ai._util._async import configured_async_backend, current_async_backend
+from inspect_ai._util.error import PrerequisiteError
 
 # https://filesystem-spec.readthedocs.io/en/latest/_modules/fsspec/spec.html#AbstractFileSystem
 # https://filesystem-spec.readthedocs.io/en/latest/api.html#fsspec.generic.GenericFileSystem
@@ -169,6 +170,9 @@ class FileSystem:
     def exists(self, path: str) -> bool:
         return self.fs.exists(path) is True
 
+    def touch(self, path: str) -> None:
+        self.fs.touch(path)
+
     def rm(
         self, path: str, recursive: bool = False, maxdepth: int | None = None
     ) -> None:
@@ -217,6 +221,16 @@ class FileSystem:
 
     def is_local(self) -> bool:
         return isinstance(self.fs, fsspec.implementations.local.LocalFileSystem)
+
+    def is_writeable(self, path: str) -> bool:
+        try:
+            path = path.rstrip("/\\")
+            touch_file = f"{path}{self.fs.sep}{uuid()}"
+            self.touch(touch_file)
+            self.rm(touch_file)
+            return True
+        except PermissionError:
+            return False
 
     def is_async(self) -> bool:
         return isinstance(self.fs, fsspec.asyn.AsyncFileSystem)
@@ -284,30 +298,6 @@ def filesystem(path: str, fs_options: dict[str, Any] = {}) -> FileSystem:
     return FileSystem(fs)
 
 
-@contextlib.asynccontextmanager
-async def async_fileystem(
-    location: str, fs_options: dict[str, Any] = {}
-) -> AsyncIterator[AsyncFileSystem]:
-    # determine protocol
-    protocol, _ = split_protocol(location)
-    protocol = protocol or "file"
-
-    # build options
-    options = default_fs_options(location)
-    options.update(fs_options)
-
-    if protocol == "s3":
-        s3 = S3FileSystem(asynchronous=True, **options)
-        session = await s3.set_session()
-        try:
-            yield s3
-        finally:
-            await session.close()
-    else:
-        options.update({"asynchronous": True, "loop": asyncio.get_event_loop()})
-        yield fsspec.filesystem(protocol, **options)
-
-
 def absolute_file_path(file: str) -> str:
     # check for a relative dir, if we find one then resolve to absolute
     fs_scheme = urlparse(file).scheme
@@ -317,7 +307,17 @@ def absolute_file_path(file: str) -> str:
 
 
 def default_fs_options(file: str) -> dict[str, Any]:
-    options = deepcopy(DEFAULT_FS_OPTIONS.get(urlparse(file).scheme, {}))
+    scheme = urlparse(file).scheme
+    if (
+        scheme == "s3"
+        and configured_async_backend() == "trio"
+        and current_async_backend() == "trio"
+    ):
+        raise PrerequisiteError(
+            "ERROR: The s3 interface is not supported when running under the trio async backend."
+        )
+
+    options = deepcopy(DEFAULT_FS_OPTIONS.get(scheme, {}))
     # disable caching for all filesystems
     options.update(
         dict(
@@ -354,7 +354,7 @@ def safe_filename(s: str, max_length: int = 255) -> str:
     Returns:
         str: A safe filename string
 
-    Example:
+    Examples:
         >>> safe_filename("Hello/World?.txt")
         'Hello_World.txt'
     """

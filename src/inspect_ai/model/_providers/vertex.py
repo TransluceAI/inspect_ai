@@ -4,7 +4,13 @@ from copy import copy
 from typing import Any, cast
 
 import vertexai  # type: ignore
-from google.api_core.exceptions import TooManyRequests
+from google.api_core.exceptions import (
+    Aborted,
+    ClientError,
+    DeadlineExceeded,
+    ServiceUnavailable,
+)
+from google.api_core.retry import if_transient_error
 from google.protobuf.json_format import MessageToDict
 from pydantic import JsonValue
 from typing_extensions import override
@@ -28,9 +34,10 @@ from inspect_ai._util.content import (
     Content,
     ContentAudio,
     ContentImage,
+    ContentReasoning,
     ContentText,
-    ContentVideo,
 )
+from inspect_ai._util.http import is_retryable_http_status
 from inspect_ai._util.images import file_as_data
 from inspect_ai.tool import ToolCall, ToolChoice, ToolInfo
 
@@ -109,6 +116,11 @@ class VertexAPI(ModelAPI):
 
         self.model = GenerativeModel(model_name)
 
+    @override
+    async def close(self) -> None:
+        # GenerativeModel uses a cached/shared client so there is no 'close'
+        pass
+
     async def generate(
         self,
         input: list[ChatMessage],
@@ -164,8 +176,18 @@ class VertexAPI(ModelAPI):
         return output, call
 
     @override
-    def is_rate_limit(self, ex: BaseException) -> bool:
-        return isinstance(ex, TooManyRequests)
+    def should_retry(self, ex: Exception) -> bool:
+        # google API-specific errors
+        if isinstance(ex, Aborted | DeadlineExceeded | ServiceUnavailable):
+            return True
+        # standard HTTP errors
+        elif isinstance(ex, ClientError) and ex.code is not None:
+            return is_retryable_http_status(ex.code)
+        # additional errors flagged by google as transient
+        elif isinstance(ex, Exception):
+            return if_transient_error(ex)
+        else:
+            return False
 
     @override
     def connection_key(self) -> str:
@@ -314,10 +336,13 @@ async def content_part(content: Content | str) -> Part:
     elif isinstance(content, ContentImage):
         image_bytes, mime_type = await file_as_data(content.image)
         return Part.from_image(image=Image.from_bytes(data=image_bytes))
+    elif isinstance(content, ContentReasoning):
+        return Part.from_text(content.reasoning or NO_CONTENT)
     else:
         if isinstance(content, ContentAudio):
             file = content.audio
-        elif isinstance(content, ContentVideo):
+        else:
+            # it's ContentVideo
             file = content.video
         file_bytes, mime_type = await file_as_data(file)
         return Part.from_data(file_bytes, mime_type)
