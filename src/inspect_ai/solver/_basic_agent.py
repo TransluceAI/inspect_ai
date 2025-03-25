@@ -217,6 +217,7 @@ def basic_agent(
                                     state.messages.append(
                                         ChatMessageUser(content=response_message)
                                     )
+                                    state.dump_messages_to_stream()
 
                 # main loop (state.completed checks message_limit and token_limit)
                 while not state.completed:
@@ -225,6 +226,7 @@ def basic_agent(
                         input=state.messages, tools=state.tools, cache=cache
                     )
                     state.messages.append(state.output.message)
+                    state.dump_messages_to_stream()
 
                     # check for context window overflow
                     if state.output.stop_reason == "model_length":
@@ -244,6 +246,7 @@ def basic_agent(
                             max_output=max_tool_output,
                         )
                         state.messages.extend(tool_results)
+                        state.dump_messages_to_stream()
 
                         # was an answer submitted?
                         answer = submission(tool_results)
@@ -277,10 +280,12 @@ def basic_agent(
                                 state.messages.append(
                                     ChatMessageUser(content=response_message)
                                 )
+                                state.dump_messages_to_stream()
 
                     # no tool calls, urge the model to continue
                     else:
                         state.messages.append(ChatMessageUser(content=continue_message))
+                        state.dump_messages_to_stream()
 
             # propagate current state along with sample limit exceeded
             except SampleLimitExceededError as ex:
